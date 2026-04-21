@@ -239,12 +239,78 @@ class WizardAstar(WizardSearchAgent):
 class CrystalSearchWizard(WizardSearchAgent):
     # TODO: YOUR CODE HERE
     # Use A* but have to take in account for the crystal
+    @dataclass(eq=True, frozen=True, order=True)
+    class SearchState:
+        wizard_loc: Location
+        portal_loc: Location
+        remaining_crystals: frozenset[Location]
+
+    paths: dict[SearchState, tuple[float, list[WizardMoves]]] = {}
+    search_pq: list[tuple[float, SearchState]] = []
+    initial_game_state: GameState
+    initial_crystals: frozenset[Location]
+
+    def search_to_game(self, search_state: SearchState) -> GameState:
+        initial_wizard_loc = self.initial_game_state.active_entity_location
+        initial_wizard = self.initial_game_state.get_active_entity()
+
+        new_game_state = (
+            self.initial_game_state.replace_entity(
+                initial_wizard_loc.row, initial_wizard_loc.col, EmptyEntity()
+            )
+            .replace_entity(
+                search_state.wizard_loc.row, search_state.wizard_loc.col, initial_wizard
+            )
+            .replace_active_entity_location(search_state.wizard_loc)
+        )
+
+        for crystal_loc in self.initial_crystals:
+            if crystal_loc not in search_state.remaining_crystals:
+                new_game_state = new_game_state.replace_entity(
+                    crystal_loc.row, crystal_loc.col, EmptyEntity()
+                )
+        new_game_state = new_game_state.replace_entity(
+            search_state.wizard_loc.row, search_state.wizard_loc.col, initial_wizard
+        ).replace_active_entity_location(search_state.wizard_loc)
+
+        return new_game_state
+
+    def game_to_search(self, game_state: GameState) -> SearchState:
+        wizard_loc = game_state.active_entity_location
+        portal_loc = game_state.get_all_tile_locations(Portal)[0]
+        remaining_crystals = frozenset(game_state.get_all_entity_locations(Crystal))
+        return self.SearchState(wizard_loc, portal_loc, remaining_crystals)
+    
 
     def __init__(self, initial_state: GameState):
         self.start_search(initial_state)
 
+    def start_search(self, game_state: GameState):
+        self.initial_game_state = game_state
+        self.initial_crystals = frozenset(game_state.get_all_entity_locations(Crystal))
+
+        initial_search_state = self.game_to_search(game_state)
+        self.paths = {}
+        self.paths[initial_search_state] = (0, [])
+        self.search_pq = [(0, initial_search_state)]
+
+    def is_goal(self, state: SearchState) -> bool:
+        return state.wizard_loc == state.portal_loc and len(state.remaining_crystals) == 0
+
     def cost(self, source: GameState, target: GameState, action: WizardMoves) -> float:
         return 1
+
+    def heuristic(self, state) -> float:
+        if not state.remaining_crystals:
+            return abs(state.wizard_loc.row - state.portal_loc.row) + abs(state.wizard_loc.col - state.portal_loc.col)
+        
+        total = 0
+        for crystal_loc in state.remaining_crystals:
+            to_crystal = abs(state.wizard_loc.row - crystal_loc.row) + abs(state.wizard_loc.col - crystal_loc.col)
+            to_portal = abs(crystal_loc.row - state.portal_loc.row) + abs(crystal_loc.col - state.portal_loc.col)
+            total = max(total, to_crystal + to_portal)
+        return total
+        #raise NotImplementedError
 
     def next_search_expansion(self) -> GameState | None:
         # TODO YOUR CODE HERE
@@ -277,7 +343,7 @@ class CrystalSearchWizard(WizardSearchAgent):
 
 class SuboptimalCrystalSearchWizard(CrystalSearchWizard):
     #crystal search but its unoptimal lol, => overestimate?
-    def heuristic(self, target: SearchState) -> float:
+    def heuristic(self, target) -> float:
         # TODO YOUR CODE HERE
         if not target.remaining_crystals:
             return abs(target.wizard_loc.row - target.portal_loc.row) + abs(target.wizard_loc.col - target.portal_loc.col)
