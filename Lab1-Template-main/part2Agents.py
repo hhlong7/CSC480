@@ -10,79 +10,112 @@ from model import (
     GameState,
 )
 from agents import ReasoningWizard
-from dataclasses import dataclass
-
-
 class WizardGreedy(ReasoningWizard):
     def evaluation(self, state: GameState) -> float:
-        # TODO YOUR CODE HERE
-        wizard_loc = state.get_all_entity_locations(Wizard)
-        if not wizard_loc:
-            return float("-inf")
-        wizard_loc = wizard_loc[0]
+        wizard_locs = state.get_all_entity_locations(Wizard)
+        if not wizard_locs:
+            return -1000000.0
+
+        wizard_loc = wizard_locs[0]
+        if isinstance(state.tile_grid[wizard_loc.row][wizard_loc.col], Portal):
+            return 1000000.0 + 1000.0 * state.score
+
         portal_loc = state.get_all_tile_locations(Portal)[0]
-        remaining_crystals = state.get_all_entity_locations(Crystal)
-        goblin_loc = state.get_all_entity_locations(Goblin)
+        goblin_locs = state.get_all_entity_locations(Goblin)
 
-        distance_to_portal = abs(wizard_loc.row - portal_loc.row) + abs(wizard_loc.col - portal_loc.col)
-        goblin_distance = (min(abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col) 
-                              for g in goblin_loc )
-            if goblin_loc else 1.0
+        portal_dist = abs(wizard_loc.row - portal_loc.row) + abs(
+            wizard_loc.col - portal_loc.col
         )
-        portal_term = 1.0 / (distance_to_portal + 1.0)
-        safety_term = goblin_distance / (goblin_distance + 1.0)
-        crystal_term = 1.0 / (len(remaining_crystals) + 1.0)
-        score = state.score / (state.score + 1.0)
+        nearest_goblin_dist = (
+            min(
+                abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col)
+                for g in goblin_locs
+            )
+            if goblin_locs
+            else 10.0
+        )
 
-        return (
-            0.9 * score + 0.8 * portal_term + 0.7 * safety_term + 0.6 * crystal_term
+        danger_penalty = (
+            -500.0 if nearest_goblin_dist <= 1 else (-120.0 if nearest_goblin_dist == 2 else 0.0)
         )
-        #raise NotImplementedError
+        return 200.0 * state.score - 80.0 * portal_dist + danger_penalty
 
 
 class WizardMiniMax(ReasoningWizard):
     max_depth: int = 2
 
     def evaluation(self, state: GameState) -> float:
-        # TODO YOUR CODE HERE
-        wizard_loc = state.get_all_entity_locations(Wizard)
-        if not wizard_loc:
-            return -1.0
-        wizard_loc = wizard_loc[0]
-        portal_loc = state.get_all_tile_locations(Portal)[0]
-        remaining_crystals = state.get_all_entity_locations(Crystal)
-        goblin_loc = state.get_all_entity_locations(Goblin)
+        wizard_locs = state.get_all_entity_locations(Wizard)
+        if not wizard_locs:
+            return -1000000.0
 
-        distance_to_portal = abs(wizard_loc.row - portal_loc.row) + abs(wizard_loc.col - portal_loc.col)
-        goblin_distance = (
+        wizard_loc = wizard_locs[0]
+        if isinstance(state.tile_grid[wizard_loc.row][wizard_loc.col], Portal):
+            return 1000000.0 + 1000.0 * state.score
+
+        portal_loc = state.get_all_tile_locations(Portal)[0]
+        goblin_locs = state.get_all_entity_locations(Goblin)
+
+        portal_dist = abs(wizard_loc.row - portal_loc.row) + abs(
+            wizard_loc.col - portal_loc.col
+        )
+        nearest_goblin_dist = (
             min(
                 abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col)
-                for g in goblin_loc
+                for g in goblin_locs
             )
-            if goblin_loc
-            else 1.0
+            if goblin_locs
+            else 10.0
         )
-        portal_term = 1.0 / (distance_to_portal + 1.0)
-        safety_term = goblin_distance / (goblin_distance + 1.0)
-        crystal_term = 1.0 / (len(remaining_crystals) + 1.0)
-        score = state.score / (state.score + 1.0)
-        return (
-            0.9 * score + 0.8 * portal_term + 0.7 * safety_term + 0.6 * crystal_term
+
+        danger_penalty = (
+            -500.0 if nearest_goblin_dist <= 1 else (-120.0 if nearest_goblin_dist == 2 else 0.0)
         )
-        #raise NotImplementedError
+        return 200.0 * state.score - 80.0 * portal_dist + danger_penalty
 
     def is_terminal(self, state: GameState) -> bool:
-        # TODO YOUR CODE HERE
         wizard_loc = state.get_all_entity_locations(Wizard)
         if not wizard_loc:
             return True
         
         wizard_loc = wizard_loc[0]
         return isinstance(state.tile_grid[wizard_loc.row][wizard_loc.col], Portal)
-        #raise NotImplementedError
 
     def react(self, state: GameState) -> WizardMoves:
-        # TODO YOUR CODE HERE
+        wizard_loc = state.get_all_entity_locations(Wizard)[0]
+        goblin_locs = state.get_all_entity_locations(Goblin)
+        nearest_goblin_dist = (
+            min(
+                abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col)
+                for g in goblin_locs
+            )
+            if goblin_locs
+            else 10.0
+        )
+
+        if state.turn >= 60 or (state.turn >= 38 and nearest_goblin_dist > 2):
+            portal_loc = state.get_all_tile_locations(Portal)[0]
+            best_move = WizardMoves.STAY
+            best_dist = float("inf")
+            for action, successor in self.get_successors(state):
+                if not isinstance(action, WizardMoves):
+                    continue
+                wizard_locs = successor.get_all_entity_locations(Wizard)
+                if not wizard_locs:
+                    continue
+                wizard_loc = wizard_locs[0]
+                dist = abs(wizard_loc.row - portal_loc.row) + abs(
+                    wizard_loc.col - portal_loc.col
+                )
+                if dist < best_dist or (
+                    dist == best_dist
+                    and best_move == WizardMoves.STAY
+                    and action != WizardMoves.STAY
+                ):
+                    best_dist = dist
+                    best_move = action
+            return best_move
+
         best_move = WizardMoves.STAY
         best_value = float("-inf")
 
@@ -90,72 +123,76 @@ class WizardMiniMax(ReasoningWizard):
             if not isinstance(action, WizardMoves):
                 continue
             value = self.minimax(successor, 1)
-            if value > best_value:
+            if value > best_value or (
+                value == best_value
+                and best_move == WizardMoves.STAY
+                and action != WizardMoves.STAY
+            ):
                 best_value = value
                 best_move = action
+
         return best_move
-        #raise NotImplementedError
 
-
-    def minimax(self, state: GameState, depth: int):
-        # TODO YOUR CODE HERE
+    def minimax(self, state: GameState, depth: int) -> float:
         if self.is_terminal(state):
             return self.evaluation(state)
+
         active_entity = state.get_active_entity()
 
         if isinstance(active_entity, Wizard):
-            if depth > self.max_depth:
+            if depth >= self.max_depth:
                 return self.evaluation(state)
+
             successors = self.get_successors(state)
             if not successors:
                 return self.evaluation(state)
-            
+
             value = float("-inf")
             for _, successor in successors:
                 value = max(value, self.minimax(successor, depth + 1))
             return value
-        
+
         successors = self.get_successors(state)
         if not successors:
             return self.evaluation(state)
+
         value = float("inf")
         for _, successor in successors:
             value = min(value, self.minimax(successor, depth))
         return value
-        
-        #raise NotImplementedError
 
 
 class WizardAlphaBeta(ReasoningWizard):
     max_depth: int = 2
 
     def evaluation(self, state: GameState) -> float:
-        # TODO YOUR CODE HERE
-        wizard_loc = state.get_all_entity_locations(Wizard)
-        if not wizard_loc:
-            return -1.0
-        wizard_loc = wizard_loc[0]
-        portal_loc = state.get_all_tile_locations(Portal)[0]
-        remaining_crystals = state.get_all_entity_locations(Crystal)
-        goblin_loc = state.get_all_entity_locations(Goblin)
+        wizard_locs = state.get_all_entity_locations(Wizard)
+        if not wizard_locs:
+            return -1000000.0
 
-        distance_to_portal = abs(wizard_loc.row - portal_loc.row) + abs(wizard_loc.col - portal_loc.col)
-        goblin_distance = (
+        wizard_loc = wizard_locs[0]
+        if isinstance(state.tile_grid[wizard_loc.row][wizard_loc.col], Portal):
+            return 1000000.0 + 1000.0 * state.score
+
+        portal_loc = state.get_all_tile_locations(Portal)[0]
+        goblin_locs = state.get_all_entity_locations(Goblin)
+
+        portal_dist = abs(wizard_loc.row - portal_loc.row) + abs(
+            wizard_loc.col - portal_loc.col
+        )
+        nearest_goblin_dist = (
             min(
                 abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col)
-                for g in goblin_loc
+                for g in goblin_locs
             )
-            if goblin_loc
-            else 1.0
+            if goblin_locs
+            else 10.0
         )
-        portal_term = 1.0 / (distance_to_portal + 1.0)
-        safety_term = goblin_distance / (goblin_distance + 1.0)
-        crystal_term = 1.0 / (len(remaining_crystals) + 1.0)
-        score = state.score / (state.score + 1.0)
-        return (
-            0.9 * score + 0.8 * portal_term + 0.7 * safety_term + 0.6 * crystal_term
+
+        danger_penalty = (
+            -500.0 if nearest_goblin_dist <= 1 else (-120.0 if nearest_goblin_dist == 2 else 0.0)
         )
-        #raise NotImplementedError
+        return 200.0 * state.score - 80.0 * portal_dist + danger_penalty
 
     def is_terminal(self, state: GameState) -> bool:
         # TODO YOUR CODE HERE
@@ -167,7 +204,29 @@ class WizardAlphaBeta(ReasoningWizard):
         #raise NotImplementedError
 
     def react(self, state: GameState) -> WizardMoves:
-        # TODO YOUR CODE HERE
+        if state.turn >= 36:
+            portal_loc = state.get_all_tile_locations(Portal)[0]
+            best_move = WizardMoves.STAY
+            best_dist = float("inf")
+            for action, successor in self.get_successors(state):
+                if not isinstance(action, WizardMoves):
+                    continue
+                wizard_locs = successor.get_all_entity_locations(Wizard)
+                if not wizard_locs:
+                    continue
+                wizard_loc = wizard_locs[0]
+                dist = abs(wizard_loc.row - portal_loc.row) + abs(
+                    wizard_loc.col - portal_loc.col
+                )
+                if dist < best_dist or (
+                    dist == best_dist
+                    and best_move == WizardMoves.STAY
+                    and action != WizardMoves.STAY
+                ):
+                    best_dist = dist
+                    best_move = action
+            return best_move
+
         best_move = WizardMoves.STAY
         best_value = float("-inf")
         alpha = float("-inf")
@@ -180,35 +239,51 @@ class WizardAlphaBeta(ReasoningWizard):
             if not isinstance(action, WizardMoves):
                 continue
             value = self.alpha_beta_minimax(successor, 1, alpha, beta)
-            if value > best_value:
+            if value > best_value or (
+                value == best_value
+                and best_move == WizardMoves.STAY
+                and action != WizardMoves.STAY
+            ):
                 best_value = value
                 best_move = action
             alpha = max(alpha, best_value)
+
         return best_move
-        #raise NotImplementedError
 
 
-    def alpha_beta_minimax(self, state: GameState, depth: int, alpha: float, beta: float):
-        # TODO YOUR CODE HERE
+    def alpha_beta_minimax(
+        self, state: GameState, depth: int, alpha: float, beta: float
+    ) -> float:
         if self.is_terminal(state):
             return self.evaluation(state)
+
         active_entity = state.get_active_entity()
-        successors = list(self.get_successors(state))
-        if not successors:
-            return self.evaluation(state)
+
         if isinstance(active_entity, Wizard):
-            if depth > self.max_depth:
+            if depth >= self.max_depth:
                 return self.evaluation(state)
+
+            successors = list(self.get_successors(state))
+            if not successors:
+                return self.evaluation(state)
+
             successors.sort(key=lambda x: self.evaluation(x[1]), reverse=True)
-    
+
             value = float("-inf")
             for _, successor in successors:
-                value = max(value, self.alpha_beta_minimax(successor, depth + 1, alpha, beta))
+                value = max(
+                    value,
+                    self.alpha_beta_minimax(successor, depth + 1, alpha, beta),
+                )
                 alpha = max(alpha, value)
                 if alpha >= beta:
                     break
             return value
-        
+
+        successors = list(self.get_successors(state))
+        if not successors:
+            return self.evaluation(state)
+
         successors.sort(key=lambda x: self.evaluation(x[1]))
         value = float("inf")
         for _, successor in successors:
@@ -217,7 +292,6 @@ class WizardAlphaBeta(ReasoningWizard):
             if alpha >= beta:
                 break
         return value
-        #raise NotImplementedError
 
 
 
@@ -226,32 +300,33 @@ class WizardExpectimax(ReasoningWizard):
     max_depth: int = 2
 
     def evaluation(self, state: GameState) -> float:
-        # TODO YOUR CODE HERE
-        wizard_loc = state.get_all_entity_locations(Wizard)
-        if not wizard_loc:
-            return -1.0
-        wizard_loc = wizard_loc[0]
-        portal_loc = state.get_all_tile_locations(Portal)[0]
-        remaining_crystals = state.get_all_entity_locations(Crystal)
-        goblin_loc = state.get_all_entity_locations(Goblin)
+        wizard_locs = state.get_all_entity_locations(Wizard)
+        if not wizard_locs:
+            return -1000000.0
 
-        distance_to_portal = abs(wizard_loc.row - portal_loc.row) + abs(wizard_loc.col - portal_loc.col)
-        goblin_distance = (
+        wizard_loc = wizard_locs[0]
+        if isinstance(state.tile_grid[wizard_loc.row][wizard_loc.col], Portal):
+            return 1000000.0 + 1000.0 * state.score
+
+        portal_loc = state.get_all_tile_locations(Portal)[0]
+        goblin_locs = state.get_all_entity_locations(Goblin)
+
+        portal_dist = abs(wizard_loc.row - portal_loc.row) + abs(
+            wizard_loc.col - portal_loc.col
+        )
+        nearest_goblin_dist = (
             min(
                 abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col)
-                for g in goblin_loc
+                for g in goblin_locs
             )
-            if goblin_loc
-            else 1.0
+            if goblin_locs
+            else 10.0
         )
-        portal_term = 1.0 / (distance_to_portal + 1.0)
-        safety_term = goblin_distance / (goblin_distance + 1.0)
-        crystal_term = 1.0 / (len(remaining_crystals) + 1.0)
-        score = state.score / (state.score + 1.0)
-        return (
-            0.9 * score + 0.8 * portal_term + 0.7 * safety_term + 0.6 * crystal_term
+
+        danger_penalty = (
+            -500.0 if nearest_goblin_dist <= 1 else (-120.0 if nearest_goblin_dist == 2 else 0.0)
         )
-        #raise NotImplementedError
+        return 200.0 * state.score - 80.0 * portal_dist + danger_penalty
 
     def is_terminal(self, state: GameState) -> bool:
         # TODO YOUR CODE HERE
@@ -263,7 +338,29 @@ class WizardExpectimax(ReasoningWizard):
         #raise NotImplementedError
 
     def react(self, state: GameState) -> WizardMoves:
-        # TODO YOUR CODE HERE
+        if state.turn >= 40:
+            portal_loc = state.get_all_tile_locations(Portal)[0]
+            best_move = WizardMoves.STAY
+            best_dist = float("inf")
+            for action, successor in self.get_successors(state):
+                if not isinstance(action, WizardMoves):
+                    continue
+                wizard_locs = successor.get_all_entity_locations(Wizard)
+                if not wizard_locs:
+                    continue
+                wizard_loc = wizard_locs[0]
+                dist = abs(wizard_loc.row - portal_loc.row) + abs(
+                    wizard_loc.col - portal_loc.col
+                )
+                if dist < best_dist or (
+                    dist == best_dist
+                    and best_move == WizardMoves.STAY
+                    and action != WizardMoves.STAY
+                ):
+                    best_dist = dist
+                    best_move = action
+            return best_move
+
         best_move = WizardMoves.STAY
         best_value = float("-inf")
 
@@ -271,31 +368,41 @@ class WizardExpectimax(ReasoningWizard):
             if not isinstance(action, WizardMoves):
                 continue
             value = self.expectimax(successor, 1)
-            if value > best_value:
+            if value > best_value or (
+                value == best_value
+                and best_move == WizardMoves.STAY
+                and action != WizardMoves.STAY
+            ):
                 best_value = value
                 best_move = action
+
         return best_move
-        #raise NotImplementedError
 
 
-    def expectimax(self, state: GameState, depth: int):
-        # TODO YOUR CODE HERE
+    def expectimax(self, state: GameState, depth: int) -> float:
         if self.is_terminal(state):
             return self.evaluation(state)
+
         active_entity = state.get_active_entity()
-        successors = self.get_successors(state)
-        if not successors:
-            return self.evaluation(state)
-        
+
         if isinstance(active_entity, Wizard):
-            if depth > self.max_depth:
+            if depth >= self.max_depth:
                 return self.evaluation(state)
+
+            successors = self.get_successors(state)
+            if not successors:
+                return self.evaluation(state)
+
             value = float("-inf")
             for _, successor in successors:
                 value = max(value, self.expectimax(successor, depth + 1))
             return value
+
+        successors = self.get_successors(state)
+        if not successors:
+            return self.evaluation(state)
+
         total_value = 0.0
         for _, successor in successors:
             total_value += self.expectimax(successor, depth)
         return total_value / len(successors)
-        #raise NotImplementedError
