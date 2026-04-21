@@ -25,8 +25,8 @@ class WizardGreedy(ReasoningWizard):
         goblin_loc = state.get_all_entity_locations(Goblin)
 
         distance_to_portal = abs(wizard_loc.row - portal_loc.row) + abs(wizard_loc.col - portal_loc.col)
-        goblin_distance = min(abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col) 
-                              for g in goblin_loc 
+        goblin_distance = (min(abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col) 
+                              for g in goblin_loc )
             if goblin_loc else 1.0
         )
         portal_term = 1.0 / (distance_to_portal + 1.0)
@@ -54,9 +54,13 @@ class WizardMiniMax(ReasoningWizard):
         goblin_loc = state.get_all_entity_locations(Goblin)
 
         distance_to_portal = abs(wizard_loc.row - portal_loc.row) + abs(wizard_loc.col - portal_loc.col)
-        goblin_distance = min(abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col) 
-                              for g in goblin_loc
-            if goblin_loc else 1.0
+        goblin_distance = (
+            min(
+                abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col)
+                for g in goblin_loc
+            )
+            if goblin_loc
+            else 1.0
         )
         portal_term = 1.0 / (distance_to_portal + 1.0)
         safety_term = goblin_distance / (goblin_distance + 1.0)
@@ -136,9 +140,13 @@ class WizardAlphaBeta(ReasoningWizard):
         goblin_loc = state.get_all_entity_locations(Goblin)
 
         distance_to_portal = abs(wizard_loc.row - portal_loc.row) + abs(wizard_loc.col - portal_loc.col)
-        goblin_distance = min(abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col) 
-                              for g in goblin_loc
-            if goblin_loc else 1.0
+        goblin_distance = (
+            min(
+                abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col)
+                for g in goblin_loc
+            )
+            if goblin_loc
+            else 1.0
         )
         portal_term = 1.0 / (distance_to_portal + 1.0)
         safety_term = goblin_distance / (goblin_distance + 1.0)
@@ -228,9 +236,13 @@ class WizardExpectimax(ReasoningWizard):
         goblin_loc = state.get_all_entity_locations(Goblin)
 
         distance_to_portal = abs(wizard_loc.row - portal_loc.row) + abs(wizard_loc.col - portal_loc.col)
-        goblin_distance = min(abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col) 
-                              for g in goblin_loc
-            if goblin_loc else 1.0
+        goblin_distance = (
+            min(
+                abs(wizard_loc.row - g.row) + abs(wizard_loc.col - g.col)
+                for g in goblin_loc
+            )
+            if goblin_loc
+            else 1.0
         )
         portal_term = 1.0 / (distance_to_portal + 1.0)
         safety_term = goblin_distance / (goblin_distance + 1.0)
