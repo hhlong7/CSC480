@@ -126,11 +126,14 @@ def proof_by_unsat():
     s = Solver()
 
     # TODO: YOUR CODE HERE
-
+    claim = Implies(y > 0, x + y > x)
+    s.add(Not(claim)) #negation of the claim
+    #ask the solver to satisfy it
     match s.check():
         case z3.unsat:
            print("The formula is UNSAT, meaning no contradiction can be found. Therefore the original formula must always be true.  QED.")
-
+        case z3.sat:
+            print(f"Counterexample found: {s.model()} try again bruh")
 
 """
 Similarly, how might we try to generally prove any valid logical formula such as De Morgan's Laws?
@@ -144,7 +147,13 @@ def demorgans_proof():
         Print "No counterexample can be found, therefore the statement is true" if the given formula f is true, otherwise print "The formula f is false, with counterexample given by: " and the model that shows the formula to be false.
         """
         # TODO: YOUR CODE HERE
-        pass
+        s = Solver()
+        s.add(Not(f))
+        match s.check():
+            case z3.unsat:
+                print("No counterexample can be found, therefore the statement is true")
+            case z3.sat:
+                print(f"counterexample: {s.model()}")
 
     prove(demorgan)
 
@@ -176,9 +185,38 @@ def wedding_planning():
         "There is no acceptable seating arraignment"
     """
     #TODO: YOUR CODE HERE
+    #[0,1,2] = [left, middle, right]
+    alice = Int('alice')
+    bob = Int('bob')
+    charlie = Int('charlie')
+    s = Solver()
+    s.add(bob >= 0, bob <= 2)
+    s.add(alice >= 0, alice <= 2)
+    s.add(charlie >= 0, charlie <= 2)
 
+    #diff seats:
+    s.add(Distinct(alice, bob, charlie))
 
+    #Alice does not sit next to Charlie
+    s.add(alice - charlie != 1, alice - charlie != -1)
 
+    #alice cant sit on 0
+    s.add(alice != 0)
+    
+    #bob hates to sit on the right of charlie for some reasons
+    s.add(bob <= charlie) #bob must be lesser than charlie (index wise)
+
+    match s.check():
+        case z3.sat:
+            model = s.model()
+            alice_seat = model[alice].as_long()
+            bob_seat = model[bob].as_long()
+            charlie_seat = model[charlie].as_long()
+
+            seat_names = {0: 'left', 1: 'middle', 2: 'right'}
+            print(f"Alice sits on the {seat_names[alice_seat]}, Charlie in the {seat_names[charlie_seat]}, and Bob on the {seat_names[bob_seat]}.")
+        case z3.unsat:
+            print("There is no acceptable seating arrangement")
 
 
 """
@@ -204,6 +242,35 @@ def sudoku(puzzle):
     """
     #TODO: YOUR CODE HERE
 
+    cells = [[Int(f'cell_{row}_{col}') for col in range(9)] for row in range(9)]
+    s = Solver()
+    for row in range(9):
+        for col in range(9): #between 1 -> 9
+            s.add(cells[row][col] >= 1, cells[row][col] <= 9)
+    for row in range(9): #distinct vals in each rows
+        s.add(Distinct(cells[row]))
+    for col in range(9): #distinct vals in each cols
+        s.add(Distinct([cells[row][col] for row in range(9)]))
+    for box_row in range(0,9,3): #distinct vals in each 3x3 boxes
+        for box_col in range(0,9,3):
+            box_cells = []
+            for r in range(3):
+                for c in range(3):
+                    box_cells.append(cells[box_row + r][box_col + c])
+            s.add(Distinct(box_cells))
+    
+    for row in range(9): 
+        for col in range(9):
+            if puzzle[row][col] != 0:
+                s.add(cells[row][col] == puzzle[row][col])
+    
+    match s.check():
+        case z3.sat:
+            model = s.model()
+            sol = [[model.evaluate(cells[row][col]).as_long() for col in range(9)] for row in range(9)]
+            print_sudoku(sol)
+        case z3.unsat:
+            print("The puzzle is impossible.")
 
 
 instance = ((0,0,0,0,9,4,0,3,0),
@@ -230,7 +297,7 @@ The question is: How many ways can $2 be made using any number of coins?
 
 def coin_sum(total):
     # Variables for the numbers of each coin denomination
-    p,n,d,q,f,d = Ints('p n d q f d')
+    p,n,d,q,f,dl = Ints('p n d q f dl')
 
     """
     Print the number of ways the $2 can be made using any number of the above coins.
@@ -238,3 +305,12 @@ def coin_sum(total):
     Hint: You may need to run many related but slightly different model checks.
     """
     # TODO: YOUR CODE HERE
+    s = Solver()
+    s.add(p >= 0, n >= 0, d >= 0, q >= 0, f >= 0, dl >= 0)
+    s.add(p + 5*n + 10*d + 25*q + 50*f + 100*dl == total)
+    count = 0
+    while s.check() == z3.sat:
+        m = s.model()
+        count += 1
+        s.add(Or(p != m[p], n != m[n], d != m[d], q != m[q], f != m[f], dl != m[dl]))
+        print(count)
