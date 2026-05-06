@@ -21,210 +21,192 @@ class PuzzleWizard(WizardAgent):
     def __init__(self, initial_state):
         super().__init__(initial_state)
         self.plan = self.solve_maysu_puzzle(initial_state)
-    
-    def solve_maysu_puzzle(self, state: GameState) -> list:
+
+    def solve_maysu_puzzle(self, state: GameState) -> list[WizardMoves]:
         rows, cols = state.grid_size
-        fire_stones = set(state.get_all_tile_locations(FireStone))
-        ice_stones = set(state.get_all_tile_locations(IceStone))
-        stones = fire_stones | ice_stones
         wizard_location = state.active_entity_location
 
-        def is_valid_move(r, c):
-            if not (0 <= r < rows and 0 <= c < cols):
-                return False
-            tile = state.tile_grid[r][c]
-            return not isinstance(tile, Wall)
-        
-        def next(loc):
-            result = []
-            for direction, (nrow, ncol) in [("UP", (-1, 0)), ("DOWN", (1, 0)), ("LEFT", (0, -1)), ("RIGHT", (0, 1))]:
-                new_r, new_c = loc.row + nrow, loc.col + ncol
-                if is_valid_move(new_r, new_c):
-                    result.append((direction, Location(new_r, new_c)))
-            return result
-        
+        fire_stones = set(state.get_all_tile_locations(FireStone))
+        ice_stones = set(state.get_all_tile_locations(IceStone))
+        stones = fire_stones | ice_stones | {wizard_location}
+
+        def in_bounds(r: int, c: int) -> bool:
+            return 0 <= r < rows and 0 <= c < cols
+
+        def is_valid_move(r: int, c: int) -> bool:
+            return in_bounds(r, c) and not isinstance(state.tile_grid[r][c], Wall)
+
+        directions = {
+            "UP": (-1, 0),
+            "DOWN": (1, 0),
+            "LEFT": (0, -1),
+            "RIGHT": (0, 1),
+        }
+        opposite_directions = {"UP": "DOWN", "DOWN": "UP", "LEFT": "RIGHT", "RIGHT": "LEFT"}
+
+        open_cells = [Location(r, c) for r in range(rows) for c in range(cols) if is_valid_move(r, c)]
+
         edges = {}
-        for r in range(rows):
-            for c in range(cols):
-                if is_valid_move(r, c):
-                    for direction, _ in [("UP", (-1, 0)), ("DOWN", (1, 0)), ("LEFT", (0, -1)), ("RIGHT", (0, 1))]:
-                        edges[(r,c, direction)] = Bool(f"edge_{r}_{c}_{direction}")
+        for loc in open_cells:
+            for d, (dr, dc) in directions.items():
+                nr, nc = loc.row + dr, loc.col + dc
+                if is_valid_move(nr, nc):
+                    edges[(loc, d)] = Bool(f"e_{loc.row}_{loc.col}_{d}")
 
-        visited_var = {}
-        for r in range(rows):
-            for c in range(cols):
-                if is_valid_move(r, c):
-                    visited_var[Location(r, c)] = Bool(f"visited_{r}_{c}")
-        
+        visited_var = {loc: Bool(f"v_{loc.row}_{loc.col}") for loc in open_cells}
+        straight_var = {loc: Bool(f"s_{loc.row}_{loc.col}") for loc in open_cells}
+        turn_var = {loc: Bool(f"t_{loc.row}_{loc.col}") for loc in open_cells}
+
         s = Solver()
+
+        # Bidirectional edge consistency.
+        for loc in open_cells:
+            for d, (dr, dc) in directions.items():
+                if (loc, d) not in edges:
+                    continue
+                nloc = Location(loc.row + dr, loc.col + dc)
+                if (nloc, opposite_directions[d]) in edges:
+                    s.add(edges[(loc, d)] == edges[(nloc, opposite_directions[d])])
+
+        # Degree constraints and local shape vars.
+        for loc in open_cells:
+            incident = [edges[(loc, d)] for d in directions if (loc, d) in edges]
+            deg = sum([If(e, 1, 0) for e in incident])
+
+            # Cells are either unused (degree 0) or in loop (degree 2).
+            s.add(If(visited_var[loc], deg == 2, deg == 0))
+
+            up = edges[(loc, "UP")] if (loc, "UP") in edges else False
+            down = edges[(loc, "DOWN")] if (loc, "DOWN") in edges else False
+            left = edges[(loc, "LEFT")] if (loc, "LEFT") in edges else False
+            right = edges[(loc, "RIGHT")] if (loc, "RIGHT") in edges else False
+
+            vertical = And(up, down)
+            horizontal = And(left, right)
+            s.add(straight_var[loc] == Or(vertical, horizontal))
+            s.add(turn_var[loc] == And(visited_var[loc], Not(straight_var[loc])))
+
+        # Must include wizard start and all stones.
         for stone_location in stones:
-            s.add(visited_var[stone_location] == True)
+            if stone_location in visited_var:
+                s.add(visited_var[stone_location])
 
-        for r in range(rows):
-            for c in range(cols):
-                if not is_valid_move(r, c):
-                    continue
-                
-                locations = Location(r, c)
-                possible_edges = []
-                for direction in ["UP", "DOWN", "LEFT", "RIGHT"]:
-                    if (r, c, direction) in edges:
-                        possible_edges.append(edges[(r, c, direction)])
-
-                if_v = sum([If(edge, 1, 0) for edge in possible_edges])
-                s.add(If(visited_var[locations] == True, if_v == 2, if_v == 0))
-
-        for r in range(rows):
-            for c in range(cols):
-                if not is_valid_move(r, c):
-                    continue
-
-                #up
-                if (r, c, "UP") in edges and (r-1, c, "DOWN") in edges:
-                    s.add(edges[(r, c, "UP")] == edges[(r-1, c, "DOWN")])
-                #down
-                if (r, c, "DOWN") in edges and (r+1, c, "UP") in edges:
-                    s.add(edges[(r, c, "DOWN")] == edges[(r+1, c, "UP")])
-                #left
-                if (r, c, "LEFT") in edges and (r, c-1, "RIGHT") in edges:
-                    s.add(edges[(r, c, "LEFT")] == edges[(r, c-1, "RIGHT")])
-                #right
-                if (r, c, "RIGHT") in edges and (r, c+1, "LEFT") in edges:
-                    s.add(edges[(r, c, "RIGHT")] == edges[(r, c+1, "LEFT")])
-        
+        # Fire: must turn, and both neighboring path cells (before/after) are straight.
         for fire_stone_locations in fire_stones:
-            r, c = fire_stone_locations.row, fire_stone_locations.col
-            directions = ["UP", "DOWN", "LEFT", "RIGHT"]
-            active_directions = [edges[(r, c, d)] for d in directions if (r, c, d) in edges]
-            count = sum([If(d, 1, 0) for d in active_directions])
-            s.add(count == 2)
+            if fire_stone_locations not in visited_var:
+                continue
+            s.add(visited_var[fire_stone_locations])
+            s.add(turn_var[fire_stone_locations])
 
-            if (r, c, "UP") in edges and (r, c, "DOWN") in edges:
-                s.add(Not(And(edges[(r, c, "UP")], edges[(r, c, "DOWN")])))
-            if (r, c, "LEFT") in edges and (r, c, "RIGHT") in edges:
-                s.add(Not(And(edges[(r, c, "LEFT")], edges[(r, c, "RIGHT")])))
-            
+            # If fire uses an edge toward a neighbor, that neighbor must be straight.
+            for d, (dr, dc) in directions.items():
+                if (fire_stone_locations, d) not in edges:
+                    continue
+                nloc = Location(fire_stone_locations.row + dr, fire_stone_locations.col + dc)
+                if nloc in straight_var:
+                    s.add(Implies(edges[(fire_stone_locations, d)], straight_var[nloc]))
+
+        # Ice: must be straight, and at least one adjacent path cell turns.
         for ice_stone_locations in ice_stones:
-            r, c = ice_stone_locations.row, ice_stone_locations.col
-            up_down = And(edges[(r, c, "UP")], edges[(r, c, "DOWN")]) if (r, c, "UP") in edges and (r, c, "DOWN") in edges else False
-            left_right = And(edges[(r, c, "LEFT")], edges[(r, c, "RIGHT")]) if (r, c, "LEFT") in edges and (r, c, "RIGHT") in edges else False
+            if ice_stone_locations not in visited_var:
+                continue
+            s.add(visited_var[ice_stone_locations])
+            s.add(straight_var[ice_stone_locations])
 
-            if isinstance(up_down, bool):
-                s.add(left_right)
-            elif isinstance(left_right, bool):
-                s.add(up_down)
+            turn_neighbors = []
+            for d, (dr, dc) in directions.items():
+                if (ice_stone_locations, d) not in edges:
+                    continue
+                nloc = Location(ice_stone_locations.row + dr, ice_stone_locations.col + dc)
+                if nloc in turn_var:
+                    turn_neighbors.append(And(edges[(ice_stone_locations, d)], turn_var[nloc]))
+            if turn_neighbors:
+                s.add(Or(*turn_neighbors))
+
+        # Single-loop connectivity via flow from start to every visited node.
+        N = len(open_cells)
+        flow_var = {}
+        for loc in open_cells:
+            for d, (dr, dc) in directions.items():
+                if (loc, d) in edges:
+                    flow_var[(loc, d)] = Int(f"f_{loc.row}_{loc.col}_{d}")
+                    s.add(flow_var[(loc, d)] >= 0)
+                    s.add(flow_var[(loc, d)] <= N)
+                    s.add(flow_var[(loc, d)] <= If(edges[(loc, d)], N, 0))
+
+        visited_count = sum([If(visited_var[loc], 1, 0) for loc in open_cells])
+        for loc in open_cells:
+            inflow = []
+            outflow = []
+            for d, (dr, dc) in directions.items():
+                if (loc, d) in flow_var:
+                    outflow.append(flow_var[(loc, d)])
+                src = Location(loc.row - dr, loc.col - dc)
+                if (src, d) in flow_var:
+                    inflow.append(flow_var[(src, d)])
+
+            in_sum = sum(inflow) if inflow else 0
+            out_sum = sum(outflow) if outflow else 0
+
+            if loc == wizard_location:
+                s.add(out_sum - in_sum == visited_count - 1)
             else:
-                s.add(Or(up_down, left_right))
+                s.add(in_sum - out_sum == If(visited_var[loc], 1, 0))
 
-        #SOLVING THIS SHIT BRUH
+        if s.check() != z3.sat:
+            return []
 
-        while s.check() == z3.sat:
-            model = s.model()
-            
-            active_edges = {}
-            for (r, c, direction), edge_variable in edges.items():
-                if model.evaluate(edge_variable):
-                    loc = Location(r, c)
-                    if loc not in active_edges:
-                        active_edges[loc] = []
-                    active_edges[loc].append(direction)
+        model = s.model()
 
-            repeating_cells = set()
-            for loc in active_edges.keys():
-                repeating_cells.add(loc)
-        
-            if self.is_single_connected(repeating_cells, active_edges):
-                moves = self.extracting_moves(wizard_location, active_edges)
-                return moves
+        # Build adjacency from selected edges.
+        active_edges = {}
+        for loc in open_cells:
+            nbrs = []
+            for d, (dr, dc) in directions.items():
+                if (loc, d) in edges and model.evaluate(edges[(loc, d)], model_completion=True):
+                    nbrs.append(Location(loc.row + dr, loc.col + dc))
+            if nbrs:
+                active_edges[loc] = nbrs
 
-            block = And([edges[(r, c, d)] == model.evaluate(edges[(r, c, d)]) for (r, c, d) in edges.keys()])
-            s.add(Not(block))
-        
-        return [] #for no val solution
-    
-    def is_single_connected(self, repeating_cells, active_edges):
-        
-        if not repeating_cells:
-            return False
-        
-        start = next(iter(repeating_cells))
-        visited = set()
-        queue = [start]
-        visited.add(start)
+        if wizard_location not in active_edges:
+            return []
 
-        while queue:
-            current = queue.pop(0)
-            r, c = current.row, current.col
-            for direction in active_edges.get(current, []):
-                if direction == "UP":
-                    new_loc = Location(r-1, c)
-                elif direction == "DOWN":
-                    new_loc = Location(r+1, c)
-                elif direction == "LEFT":
-                    new_loc = Location(r, c-1)
-                else: #RIGHT
-                    new_loc = Location(r, c+1)
-
-                if new_loc in repeating_cells and new_loc not in visited:
-                    visited.add(new_loc)
-                    queue.append(new_loc)
-        
-        return len(visited) == len(repeating_cells)
-    
-    def extracting_moves(self, start, active_edges):
-        moves = []
-        current = start
+        # Walk the unique loop and emit moves.
+        moves: list[WizardMoves] = []
         old = None
+        current = wizard_location
+        step_limit = len(active_edges) + 5
+        for _ in range(step_limit):
+            nbrs = active_edges.get(current, [])
+            if len(nbrs) < 2:
+                return []
 
-        for _ in range(1000):
-            if current not in active_edges:
-                break
-        
-            next_loc = None
-            for direction in active_edges[current]:
-                r, c = current.row, current.col
-                if direction == "UP":
-                    candidate = Location(r-1, c)
-                elif direction == "DOWN":
-                    candidate = Location(r+1, c)
-                elif direction == "LEFT":
-                    candidate = Location(r, c-1)
-                else: #RIGHT
-                    candidate = Location(r, c+1)
-                
-                if candidate != old:
-                    next_loc = candidate
-                    break
-            
-            if next_loc is None:
-                break
-            
+            next_loc = nbrs[0] if nbrs[0] != old else nbrs[1]
             rr = next_loc.row - current.row
             cc = next_loc.col - current.col
-
-            if rr == -1:
+            if rr == -1 and cc == 0:
                 moves.append(WizardMoves.UP)
-            elif rr == 1:
+            elif rr == 1 and cc == 0:
                 moves.append(WizardMoves.DOWN)
-            elif cc == -1:
+            elif rr == 0 and cc == -1:
                 moves.append(WizardMoves.LEFT)
-            else:
+            elif rr == 0 and cc == 1:
                 moves.append(WizardMoves.RIGHT)
-            
-            if next_loc == start:
+            else:
+                return []
+
+            old, current = current, next_loc
+            if current == wizard_location:
                 break
 
-            old = current
-            current = next_loc
-        
         return moves
 
 
     def react(self, state: GameState) -> WizardMoves:
-        
+
         if self.plan:
             return self.plan.pop(0)
-        
+
         return WizardMoves.STAY
 
         # TODO: YOUR CODE HERE
@@ -244,7 +226,7 @@ class SpellCastingPuzzleWizard(WizardAgent):
         wizard_location = state.active_entity_location
 
         # TODO: YOUR CODE HERE
-        return MASYU_2_SOLUTION.pop(0)
+        #return MASYU_2_SOLUTION.pop(0)
 
 
 
